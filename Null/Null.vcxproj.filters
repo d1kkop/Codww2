@@ -1,0 +1,70 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Source\Util">
+      <UniqueIdentifier>{c15a9e56-9f34-49b4-8bbb-faa80b63132c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Tools">
+      <UniqueIdentifier>{7b16460b-547e-4e30-932d-f66c30e0ead8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Tools\Memory">
+      <UniqueIdentifier>{76b8827e-f1f7-4aaa-ad5a-a9d86591b95f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Util\ProcUtil.cpp">
+      <Filter>Source\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Util\StrUtil.cpp">
+      <Filter>Source\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Util\MemUtil.cpp">
+      <Filter>Source\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Util\TimeUtil.cpp">
+      <Filter>Source\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Tools\Memory\Scanner3.cpp">
+      <Filter>Source\Tools\Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Util\FileUtil.cpp">
+      <Filter>Source\Util</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Util\ProcUtil.h">
+      <Filter>Source\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Util\StrUtil.h">
+      <Filter>Source\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Common.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Config.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Null.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Util\Container.h">
+      <Filter>Source\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Util\MemUtil.h">
+      <Filter>Source\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Util\TimeUtil.h">
+      <Filter>Source\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Tools\Memory\Scanner3.h">
+      <Filter>Source\Tools\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Util\FileUtil.h">
+      <Filter>Source\Util</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
