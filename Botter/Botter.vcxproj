@@ -180,15 +180,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\3rdParty\inih-master\cpp\INIReader.cpp" />
-    <ClCompile Include="..\..\3rdParty\inih-master\ini.c" />
+    <ClCompile Include="..\3rdParty\inih-master\cpp\INIReader.cpp" />
+    <ClCompile Include="..\3rdParty\inih-master\ini.c" />
     <ClCompile Include="Botter.cpp" />
     <ClCompile Include="botter_old.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\3rdParty\inih-master\cpp\INIReader.h" />
-    <ClInclude Include="..\..\3rdParty\inih-master\ini.h" />
+    <ClInclude Include="..\3rdParty\inih-master\cpp\INIReader.h" />
+    <ClInclude Include="..\3rdParty\inih-master\ini.h" />
     <ClInclude Include="Botter.h" />
   </ItemGroup>
   <ItemGroup>

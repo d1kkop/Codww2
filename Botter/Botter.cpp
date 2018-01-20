@@ -1,6 +1,6 @@
 #include "Botter.h"
 
-#include "../../3rdParty/inih-master/cpp/IniReader.h"
+#include "../3rdParty/inih-master/cpp/IniReader.h"
 
 float U2M	   = 1.f/60.f; // unit2metesr
 float M2U	   = (1.f/U2M); // unit2metesr
