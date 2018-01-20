@@ -20,6 +20,7 @@ float AimZ   = 0.7f * M2U;
 float DistOverDot = 100.f;
 float AimPushBackLength = -20.f;
 float MinRetargetTime = .2f;
+float FocusMultiplier = 2.f;
 
 // Aim extrapolation
 float AimVelMulplier = 10.f;// 0.01f;
@@ -192,7 +193,9 @@ void BoneArray2::updateInvalidate(float tNow)
 void BoneArray2::updateTargetPoint()
 {
 	Vec3 lookDir = (getBoneRotation(0) * Vec3(1.f, 0, 0));
-	Vec3 newTarget = (getPosition()+ Vec3(0, 0, AimZ) + lookDir*AimPushBackLength) + (vel.velocity() * U2M * AimVelMulplier);
+	Vec3 vel2D   = vel.velocity();
+	vel2D.z = 0.f;
+	Vec3 newTarget = (getPosition() + Vec3(0, 0, AimZ) + lookDir*AimPushBackLength) + (vel2D * U2M * AimVelMulplier);
 	Vec3 delta = newTarget - targetPos;
 	targetPos += delta * AimFollowSoftness;
 }
@@ -311,7 +314,7 @@ Botter::Botter():
 	m_lastTargetTs = 0;
 	m_cameraState  = MemoryState::Find;
 	m_boneArrayState  = MemoryState::Find;
-
+	m_isFocussing = false;
 
 	reloadConfig();
 
@@ -394,15 +397,43 @@ bool Botter::gameTick(u32 tickIdx, float dt)
 	updateCamera();
 	updateBoneArrays();
 
-	if (::GetAsyncKeyState(VK_MENU))
+	if (::GetAsyncKeyState(VK_MENU) & 1) // PRESSED
 	{
-		updateAllies();
+		if ( m_target != nullptr )
+		{
+			IBoneArray* curTarget = fetchCurrentTarget();
+			if ( curTarget != nullptr )
+			{
+				curTarget->setAlly( true );
+				m_target = nullptr;
+			}
+		}
+		else
+		{
+			updateAllies();
+		}
 	}
 
 	if (::GetAsyncKeyState(VK_F2))
 	{
 		reloadConfig();
 	}
+
+	// happens auto
+	//if (::GetAsyncKeyState(VK_F3) & 1)
+	//{
+	//	std::lock_guard<std::mutex> lk(m_camMutex);
+	//	if ( m_cameraState == MemoryState::Wait )
+	//	{
+	//		if (m_gameCamScan)
+	//		{
+	//			m_scanner.deleteScan(m_gameCamScan->getId());
+	//			m_gameCamScan = nullptr;
+	//			m_gameCam.valid = false;
+	//		}
+	//		m_cameraState = MemoryState::Find;
+	//	}
+	//}
 
 	if (::GetAsyncKeyState(VK_F4))
 	{
@@ -412,6 +443,12 @@ bool Botter::gameTick(u32 tickIdx, float dt)
 			m_boneArrayState = MemoryState::Find;
 		}
 	}
+
+	if ((::GetAsyncKeyState(VK_F5) & 1) != 0)  { AimSpd /= 1.25f; printf("Aim speed now %.3f\n", AimSpd); }
+	if ((::GetAsyncKeyState(VK_F6) & 1) != 0)  { AimSpd *= 1.25f; printf("Aim speed now %.3f\n", AimSpd); }
+
+	m_isFocussing = false;
+	if (::GetAsyncKeyState(VK_RBUTTON)) m_isFocussing = true;
 
 	float tNow = to_seconds(time_now());
 	if ( AlwaysAim || ::GetAsyncKeyState(VK_CAPITAL) /*|| ::GetAsyncKeyState(VK_MENU)*/ ) 
@@ -687,6 +724,7 @@ void Botter::reloadConfig()
 		AimVelMulplier = (float)reader.GetReal("aim", "aimVelMultiplier", 10);
 		AimFollowSoftness = (float)reader.GetReal("aim", "aimFollowSoftness", .9);
 		MinRetargetTime = (float)reader.GetReal("aim", "minRetargetTime", .2);
+		FocusMultiplier = (float)reader.GetReal("aim", "focusMultiplier", 2.5f);
 
 		// If a bone array moves this fast, consider it in valid array
 		VelMoveThreshold = (float)reader.GetReal("validation", "velMoveThreshold", .001); // m/s
@@ -785,20 +823,14 @@ void Botter::aim(float tNow, float dt)
 	if (m_target)
 	{
 		// try fetch existing target
-		for (auto& p : m_boneArrays)
-		{
-			// refetch if bones are dynamically shifted in memory
-			if ( fabs((u64)p->getAddress() - (u64)m_target) <= 64 ) 
-			{
-				curTarget = p;
-				m_target = p->getAddress();
-				break;
-			}
-		}
+		curTarget = fetchCurrentTarget();
 
-		// loose target if got killed (dist since last update is more than some meters)
 		if ( curTarget )
 		{
+			// update address as it may have been shifted slightly in memory
+			m_target = curTarget->getAddress();
+
+			// loose target if got killed (dist since last update is more than some meters)
 			float dist = curTarget->getPosition().dist(m_lastTargetPos) * U2M;
 			if ( dist > 25.f )
 			{
@@ -854,6 +886,20 @@ void Botter::aim(float tNow, float dt)
 	if (curTarget)
 	{
 		m_lastTargetPos = curTarget->getPosition();
+
+		// skip aim if we sent mouse input but our view dir did not get adjusted.
+		// this is to prevent a bug that we keep sending mouse input even if the view dir does not change
+		// and so the players spins round
+		if ( m_lastViewDir == viewDir ) 
+		{
+			return;
+		}
+		m_lastViewDir = viewDir;
+
+		// cur aim speed
+		float aimSpeed = AimSpd * (m_isFocussing ? FocusMultiplier : 1.f);
+	//	printf("Aimspeed %.3f \n", aimSpeed);
+
 		float dist;
 		Vec3 dir = curTarget->computeDirTo(ownPos, dist);
 		float kSide = dir.dot(sideDir);
@@ -862,14 +908,27 @@ void Botter::aim(float tNow, float dt)
 		mem_zero(&input, sizeof(input));
 		input.type = INPUT_MOUSE;
 		input.mi.dwFlags = MOUSEEVENTF_MOVE;
-		input.mi.dx = (LONG)(kSide*AimSpd);
+		input.mi.dx = (LONG)(kSide*aimSpeed);
 		if ( AimVertical )
 		{
-			input.mi.dy = (LONG)(kUp*AimSpd);
+			input.mi.dy = (LONG)(kUp*aimSpeed);
 		}
 		SendInput(1, &input, sizeof(INPUT)); 
 	//	log(str_format("Aiming at target id %d, dist %3fm\n", curTarget->getId(), dist*U2M));
 	}
+}
+
+IBoneArray* Botter::fetchCurrentTarget() const
+{
+	for (auto& p : m_boneArrays)
+	{
+		// refetch if bones are dynamically shifted in memory
+		if ( fabs((u64)p->getAddress() - (u64)m_target) <= 64 ) 
+		{
+			return p;
+		}
+	}
+	return nullptr;
 }
 
 void Botter::printCameraStats() const
@@ -1028,7 +1087,7 @@ u32 Botter::isValidPlayerBot(const char* data) const
 Null::u32 Botter::isValidBoneArray(const char* data) const
 {
 	u32 iAnchor = *(u32*)(data + 0);
-	if (!(iAnchor == 0x3F800000)) return -77;// ||  iAnchor == 0)) return -77;
+	if (!(iAnchor >= 0x3F7FFFFE && iAnchor <= 0x3F800000)) return -77;// ||  iAnchor == 0)) return -77;
 
 	Bone* b = (Bone*)(data + BonePreOffset);
 	for (u32 i = 0; i < g_numBones; i++, b++)
@@ -1040,17 +1099,17 @@ Null::u32 Botter::isValidBoneArray(const char* data) const
 		//if ( fabs(b->pos.w) > 0.01f ) return -95; // THIS HAPPENS!!
 	}
 
-	//// check distances of bones
-	//b = (Bone*)(data + BonePreOffset);
-	//Vec3 anchor = b->pos;
-	//b++; // go next bone
-	//for (u32 i = 1; i < g_numBones ; i++, b++)
-	//{
-	//	Vec3 pos = b->pos;
-	//	float dist = pos.dist(anchor)*U2M;
-	//	if ( dist > 5.f ) return -250;
-	////	if ( dist < 0.001f ) return -251;
-	//}
+	// check distances of bones
+	b = (Bone*)(data + BonePreOffset);
+	Vec3 anchor = b->pos;
+	b++; // go next bone
+	for (u32 i = 1; i < g_numBones ; i++, b++)
+	{
+		Vec3 pos = b->pos;
+		float dist = pos.dist(anchor)*U2M;
+		if ( dist > 5.f ) return -250;
+	//	if ( dist < 0.001f ) return -251;
+	}
 
 	return 0;
 }

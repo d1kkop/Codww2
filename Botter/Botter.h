@@ -202,6 +202,7 @@ public:
 		return (u32)m_gameBoneArrayScan->numEntries();
 	}
 
+	IBoneArray* fetchCurrentTarget() const;
 	void printCameraStats() const;
 	void printCameraStats(Vec3 p, Vec3 f, Vec3 up, Vec3 head, Vec3 vel) const;
 	void printBoneArrays() const;
@@ -258,7 +259,9 @@ public:
 
 	const char* m_target; // loose coupling
 	Vec3 m_lastTargetPos;
+	Vec3 m_lastViewDir;
 	float m_lastTargetTs;
+	bool m_isFocussing;
 
 	// loggin
 	File m_log;
