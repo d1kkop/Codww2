@@ -24,10 +24,27 @@
     <ClCompile Include="botter_old.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\3rdParty\inih-master\cpp\INIReader.cpp">
+      <Filter>Header Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\3rdParty\inih-master\ini.c">
+      <Filter>Header Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Botter.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\3rdParty\inih-master\cpp\INIReader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\3rdParty\inih-master\ini.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="config.ini">
+      <Filter>Header Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -1,36 +1,39 @@
 #include "Botter.h"
 
+#include "../../3rdParty/inih-master/cpp/IniReader.h"
 
-const float U2M	   = 1.f/60.f; // unit2metesr
-const float M2U	   = (1.f/U2M); // unit2metesr
+float U2M	   = 1.f/60.f; // unit2metesr
+float M2U	   = (1.f/U2M); // unit2metesr
 
-const bool LogToFile = false;
-
-// Minimum bone arrays to be found before starting 
-const u32 MiniumNumBoneArrays = 1;
+bool LogToFile = false;
+bool AlwaysAim = false;
+bool CheckAlly = true;
+bool AimVertical = false;
 
 // Aim
-const float AimDot = .4f;
-const float AimDotV = .2f;
-const float MaxDst = 45.f;
-const float MinDst = 3.0f;
-const float AimSpd = 255;
-const float AimZ   = 0.7f * M2U;
-const float DistOverDot = 100.f;
+float AimDot = .4f;
+float AimDotV = .2f;
+float MaxDst = 45.f;
+float MinDst = 3.0f;
+float AimSpd = 55;
+float AimZ   = 0.7f * M2U;
+float DistOverDot = 100.f;
+float AimPushBackLength = -20.f;
+float MinRetargetTime = .2f;
 
 // Aim extrapolation
-const float AimVelMulplier = 10.f;// 0.01f;
-const float AimFollowSoftness = 0.9F;// 0.15f;
-
+float AimVelMulplier = 10.f;// 0.01f;
+float AimFollowSoftness = 0.9F;// 0.15f;
 
 // If a bone array moves this fast, consider it in valid array
-const float VelMoveThreshold = 0.001f; // m/s
-const float VelMoveThresholdHi = 4.5f; // m/s
-const float ConsiderMovingSpanTime = 0.4f; // seconds
-const u32 NumMovesBeforeValid = 3;
-const float VelMaxValid = 10.f; // m/s
+float VelMoveThreshold = 0.001f; // m/s
+float VelMoveThresholdHi = 6.5f; // m/s
+float ConsiderMovingSpanTime = 0.4f; // seconds
+u32 NumMovesBeforeValid = 3;
+float VelMaxValid = 10.f; // m/s
+float MinMoveDist = 5.f; // meters
 
-const float AllyDistance = 10.f; // meters
+float AllyDistance = 10.f; // meters
 
 const u32 BonePreOffset = 4;
 
@@ -74,6 +77,12 @@ void BoneArray2::update()
 	if ( missile ) return; // reached impossible velocity 
 
 	float tNow = to_seconds( time_now() );
+	float dt = tNow - lastUpdateTimeTs;
+	lastUpdateTimeTs = tNow;
+
+	if ( dt < 0 ) dt = 0.0001f;
+	if ( dt > 1.f ) dt = 1.f;
+
 	vel.update( getPosition() );
 
 	if ( prevBones.empty() ) 
@@ -84,7 +93,15 @@ void BoneArray2::update()
 			prevBones.emplace_back( getBonePosition(i) );
 		}
 	}
-	
+
+	updateInView(tNow);
+	updateValidation(tNow, dt);
+	updateInvalidate(tNow);
+	updateTargetPoint();
+}
+
+void BoneArray2::updateInView(float tNow)
+{
 	// do in view check
 	if ( tNow - lastInViewCheckTs > 0.1f )
 	{
@@ -106,44 +123,48 @@ void BoneArray2::update()
 		}
 		lastInViewCheckTs = tNow;
 	}
+}
 
-	// make bone array valid if has walked for N amount of times at each moment for X seconds
+void BoneArray2::updateValidation(float tNow, float dt)
+{
+	bool validMove = didValidMove();
 	float velms = vel.velocity().length() * U2M;
-	if ( !valid )
+
+	// keep updating dist moved even when already valid
+	if ( validMove ) distTravalled += velms * dt;
+
+	if ( valid ) return;
+
+	if ( !isMoving )
 	{
-		if ( !isMoving )
+		if ( validMove )
 		{
-			if ( velms > VelMoveThreshold && velms < VelMoveThresholdHi )
-			{
-				isMoving = true;
-				startedMovingTs = tNow;
-			}
+			isMoving = true;
+			startedMovingTs = tNow;
 		}
-		else 
+	}
+	else 
+	{
+		if ( !validMove )
 		{
-			if ( velms < VelMoveThreshold || velms > VelMoveThresholdHi )
+			// fail
+			isMoving = false;
+		}
+		else if ( tNow - startedMovingTs > ConsiderMovingSpanTime )
+		{
+			numTimesMoved ++;
+			if ( numTimesMoved >= NumMovesBeforeValid && distTravalled > MinMoveDist )
 			{
-				// fail
 				isMoving = false;
-			}
-			else if ( tNow - startedMovingTs > ConsiderMovingSpanTime )
-			{
-				numTimesMoved ++;
-				isMoving = false;
-				if ( numTimesMoved == NumMovesBeforeValid )
-				{
-					valid = true;
-					Botter::log(str_format( "VALID barray %p %d\n", this->getAddress(), this->getId()));
-				}
+				valid = true;
+				Botter::log(str_format( "VALID barray %p %d\n", this->getAddress(), this->getId()));
 			}
 		}
 	}
+}
 
-	// so softening to target
-	Vec3 newTarget = getPosition() + vel.velocity() * U2M * AimVelMulplier;
-	Vec3 delta = newTarget - targetPos;
-	targetPos += delta * AimFollowSoftness;
-
+void BoneArray2::updateInvalidate(float tNow)
+{
 	// NOTE bones do not update when out of view
 
 	//// if velocity is very low for some time remove bone array
@@ -168,6 +189,20 @@ void BoneArray2::update()
 	//}
 }
 
+void BoneArray2::updateTargetPoint()
+{
+	Vec3 lookDir = (getBoneRotation(0) * Vec3(1.f, 0, 0));
+	Vec3 newTarget = (getPosition()+ Vec3(0, 0, AimZ) + lookDir*AimPushBackLength) + (vel.velocity() * U2M * AimVelMulplier);
+	Vec3 delta = newTarget - targetPos;
+	targetPos += delta * AimFollowSoftness;
+}
+
+bool BoneArray2::didValidMove() const
+{
+	float velms = vel.velocity().length() * U2M;
+	return (velms > VelMoveThreshold && velms < VelMoveThresholdHi) && fabs(getAngle()-90) > 0.01f;
+}
+
 Vec3 BoneArray2::computeDirTo(const Vec3& pos, float& distOut) const
 {
 	float dist = getTargetPosition().dist(pos);
@@ -190,6 +225,15 @@ Vec3 BoneArray2::getPosition() const
 Vec3 BoneArray2::getVelocity() const
 {
 	return vel.velocity();
+}
+
+float BoneArray2::getAngle() const
+{
+	Vec4 quat = getBoneRotation( 0 );
+	Vec3 look = quat * Vec3(1, 0, 0);
+	look.normalize();
+	float ang = atan2( look.x, look.y );
+	return ang/3.14159f * 180.f;
 }
 
 Null::u32 BoneArray2::getTeam() const
@@ -227,9 +271,19 @@ Vec3 BoneArray2::getBonePosition(u32 boneIdx) const
 	if ( memEntry )
 	{
 		Bone* b = (Bone*)(memEntry->value.ptr + BonePreOffset + dynOffset);
-		return Vec3((b + boneIdx)->pos) + Vec3(0, 0, AimZ);
+		return Vec3((b + boneIdx)->pos);
 	}
 	return Vec3();
+}
+
+Vec4 BoneArray2::getBoneRotation(u32 boneIdx) const
+{
+	if ( memEntry )
+	{
+		Bone* b = (Bone*)(memEntry->value.ptr + BonePreOffset + dynOffset);
+		return (b + boneIdx)->rot;
+	}
+	return Vec4();
 }
 
 void BoneArray2::updateDynamicOffset(u32 offset)
@@ -247,7 +301,6 @@ Botter::Botter():
 	m_gameCamScan(nullptr),
 	m_gameBoneArrayScan(nullptr),
 	m_target(nullptr),
-	m_wasAiming(false),
 	m_numValidBoneArrays(0),
 	m_numInViewBoneArrays(0)
 {
@@ -255,8 +308,12 @@ Botter::Botter():
 	m_uniqueBoneArrayId = 0;
 	m_gameCamStateInvalidTs  = 0;
 	m_gameBoneStateInvalidTs = 0;
+	m_lastTargetTs = 0;
 	m_cameraState  = MemoryState::Find;
 	m_boneArrayState  = MemoryState::Find;
+
+
+	reloadConfig();
 
 	file_remove( "Botter_output.txt" );
 
@@ -342,6 +399,11 @@ bool Botter::gameTick(u32 tickIdx, float dt)
 		updateAllies();
 	}
 
+	if (::GetAsyncKeyState(VK_F2))
+	{
+		reloadConfig();
+	}
+
 	if (::GetAsyncKeyState(VK_F4))
 	{
 		std::lock_guard<std::mutex> lk(m_boneArrayMutex);
@@ -351,15 +413,15 @@ bool Botter::gameTick(u32 tickIdx, float dt)
 		}
 	}
 
-	if ( ::GetAsyncKeyState(VK_CAPITAL) /*|| ::GetAsyncKeyState(VK_MENU)*/ ) 
+	float tNow = to_seconds(time_now());
+	if ( AlwaysAim || ::GetAsyncKeyState(VK_CAPITAL) /*|| ::GetAsyncKeyState(VK_MENU)*/ ) 
 	{
-		aim(dt);
-		m_wasAiming = true;
+		aim(tNow, dt);
 	}
 	else
 	{
-		m_wasAiming = false;
 		m_target = nullptr;
+		m_lastTargetTs = tNow;
 	}
 	return true;
 }
@@ -597,6 +659,46 @@ void Botter::updateAllies()
 	}
 }
 
+void Botter::reloadConfig()
+{
+	INIReader reader("config.ini");
+
+	if (reader.ParseError() < 0) 
+	{
+		log("Failed to reload config.ini\n");
+	}
+	else
+	{ // Read settings from ini
+		LogToFile = reader.GetBoolean("general", "logToFile", false);
+		AlwaysAim = reader.GetBoolean("general", "alwaysAim", false);
+		CheckAlly = reader.GetBoolean("general", "checkAlly", true);
+		AimVertical = reader.GetBoolean("general", "aimVertical", true);
+		AllyDistance = (float)reader.GetReal("general", "allyDistance", 8.5); // meters
+
+		 // Aim
+		AimDot  = (float) reader.GetReal("aim", "aimDot", .4);
+		AimDotV = (float)reader.GetReal("aim", "aimDotV", .2);
+		MaxDst = (float)reader.GetReal("aim", "maxDst", 45);
+		MinDst = (float)reader.GetReal("aim", "minDst", 3);
+		AimSpd = (float)reader.GetReal("aim", "aimSpd", 255);
+		AimZ   = (float)reader.GetReal("aim", "aimZ", .7) * M2U;
+		AimPushBackLength = (float)reader.GetReal("aim", "aimPushBackLength", .3) * M2U;
+		DistOverDot = (float)reader.GetReal("aim", "distOverDot", 100);
+		AimVelMulplier = (float)reader.GetReal("aim", "aimVelMultiplier", 10);
+		AimFollowSoftness = (float)reader.GetReal("aim", "aimFollowSoftness", .9);
+		MinRetargetTime = (float)reader.GetReal("aim", "minRetargetTime", .2);
+
+		// If a bone array moves this fast, consider it in valid array
+		VelMoveThreshold = (float)reader.GetReal("validation", "velMoveThreshold", .001); // m/s
+		VelMoveThresholdHi =(float) reader.GetReal("validation", "velMoveThresholdHi", 4.5); // m/s
+		ConsiderMovingSpanTime = (float)reader.GetReal("validation", "considerMovingSpanTime", 0.4); // seconds
+		NumMovesBeforeValid = reader.GetInteger("validation", "numMovesBeforeValid", 5);
+		MinMoveDist = (float) reader.GetReal("validation", "minMoveDist", 5);
+
+		log("Reloaded config.ini\n");
+	}
+}
+
 void Botter::updateBoneArrays()
 {
 	if ( !m_gameCam.valid ) return;
@@ -657,9 +759,16 @@ void Botter::updateBoneArrays()
 		if (barray->isValid())  m_numValidBoneArrays++;
 		if (barray->inView())	m_numInViewBoneArrays++;
 	}
+
+	// sort on dist travalled
+	std::sort( m_boneArrays .begin(), m_boneArrays.end(), [&](auto l, auto r)
+	{
+		return l->distMoved() > r->distMoved();
+	});
+	
 }
 
-void Botter::aim(float dt)
+void Botter::aim(float tNow, float dt)
 {
 	if (!m_gameCam.valid || m_boneArrays.empty()) 
 		return;
@@ -679,7 +788,7 @@ void Botter::aim(float dt)
 		for (auto& p : m_boneArrays)
 		{
 			// refetch if bones are dynamically shifted in memory
-			if (  fabs((u64)p->getAddress() - (u64)m_target) <= 64 ) 
+			if ( fabs((u64)p->getAddress() - (u64)m_target) <= 64 ) 
 			{
 				curTarget = p;
 				m_target = p->getAddress();
@@ -687,19 +796,24 @@ void Botter::aim(float dt)
 			}
 		}
 
-		// do distance range check
-		//if ( curTarget )
-		//{
-		//	float dist = curTarget->getPosition().dist(ownPos)*U2M;
-		//	if (!(dist > MinDst && dist < MaxDst && curTarget->isValid() && curTarget->inView())) 
-		//	{
-		//		m_target = nullptr;
-		//		curTarget = nullptr;
-		//	}
-		//} else m_target = nullptr;
+		// loose target if got killed (dist since last update is more than some meters)
+		if ( curTarget )
+		{
+			float dist = curTarget->getPosition().dist(m_lastTargetPos) * U2M;
+			if ( dist > 25.f )
+			{
+				m_target = nullptr;
+				m_lastTargetTs = tNow;
+			}
+		}
+		else 
+		{
+			m_lastTargetTs = tNow;
+			m_target = nullptr;
+		}
 
-		// If was aiming but target has become invalid, do not shift to next target, let user press aim again
-		if (!m_target && m_wasAiming)
+		// Auto switch to new target only if some time elapsed
+		if (!m_target && (tNow - m_lastTargetTs < MinRetargetTime) )
 		{
 			// do not aim
 			return;
@@ -714,31 +828,32 @@ void Botter::aim(float dt)
 		{
 			if ( !(p->isValid() && p->inView()) ) continue; // skip
 			if ( p->getVelocity().length() < 1.f ) continue;
-			if ( p->isAlly() ) continue; 
+			if ( CheckAlly && p->isAlly() ) continue; 
 
 			float dist;
 			Vec3 dir = p->computeDirTo(ownPos, dist);
 			dist *= U2M;
 
 			float hDot = dir.dot(viewDir);
-			float vDot = fabs(dir.dot(sideDir));
+			float vDot = fabs(dir.dot(upDir));
 
-			dist += (1.f - fabs(hDot)) * DistOverDot;
+			float addedDist = (1.f - fabs(hDot)) * DistOverDot;
 		//	printf("Dist %.3f\n", dist);
 
 			if ((dist > MinDst && dist < MaxDst) && 
 				(hDot > AimDot && vDot < AimDotV) &&
-				dist < closest)  // find closest in aim range
+				(dist + addedDist) < closest)  // find closest in aim range
 			{
 				curTarget  = p;
 				m_target   = p->getAddress();
-				closest = dist;
+				closest = (dist + addedDist);
 			}
 		}
 	}
 
 	if (curTarget)
 	{
+		m_lastTargetPos = curTarget->getPosition();
 		float dist;
 		Vec3 dir = curTarget->computeDirTo(ownPos, dist);
 		float kSide = dir.dot(sideDir);
@@ -748,9 +863,12 @@ void Botter::aim(float dt)
 		input.type = INPUT_MOUSE;
 		input.mi.dwFlags = MOUSEEVENTF_MOVE;
 		input.mi.dx = (LONG)(kSide*AimSpd);
-	//	input.mi.dy = (LONG)(kUp*AimSpd);
+		if ( AimVertical )
+		{
+			input.mi.dy = (LONG)(kUp*AimSpd);
+		}
 		SendInput(1, &input, sizeof(INPUT)); 
-		log(str_format("Aiming at target id %d, dist %3fm\n", curTarget->getId(), dist*U2M));
+	//	log(str_format("Aiming at target id %d, dist %3fm\n", curTarget->getId(), dist*U2M));
 	}
 }
 
@@ -812,14 +930,15 @@ void Botter::printBoneArraysSimple() const
 	{
 	//	if ( p->isValid() )
 		{
-			Vec3 pos = p->getBonePosition(0);
+			Vec3 pos = p->getTargetPosition();
 			Vec3 vel = p->getVelocity();
 			u32 team = p->getTeam();
+			float ang = p->getAngle();
 			float dist = pos.dist(m_gameCam.getHeadPos());
-
-			log(str_format("\tPlayer: %d | %d | %p | team %xd | in view %s | %.3f %.3f %.3f | %.3fms | Dst %.3f\n",
-							idx, p->getId(), p->getAddress(), p->getTeam(), ( p->inView()?"yes":"no"),
-							pos.x, pos.y, pos.z, vel.length()*U2M, dist*U2M));
+			float dMoved = p->distMoved();
+			log(str_format("%p | %d | %d | valid %s | visb %s | %.3f %.3f %.3f | %.3fms | Dst %.3f | Ang %.3f | Moved %.3fM\n",
+							p->getAddress(), idx, p->getId(), (p->isValid()?"yes":"no"), (p->inView()?"yes":"no"),
+							pos.x, pos.y, pos.z, vel.length()*U2M, dist*U2M, ang, dMoved));
 			idx++;
 		}
 	}
@@ -1020,7 +1139,10 @@ bool Botter::validUp(float f) const
 
 u32 Botter::validPosition(const Vec3& pos) const
 {
-	if ( nearZero(pos) ) return -6;
+	// if ( nearZero(pos) ) return -6;
+	Vec3 pos2D = pos;
+	pos2D.z = 0.f;
+	if ( nearZero(pos2D) ) return -6;
 	u32 res = insideWorld(pos.x);
 	if (res != 0) return res;
 	res = insideWorld(pos.y);

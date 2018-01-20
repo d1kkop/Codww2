@@ -180,17 +180,24 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\3rdParty\inih-master\cpp\INIReader.cpp" />
+    <ClCompile Include="..\..\3rdParty\inih-master\ini.c" />
     <ClCompile Include="Botter.cpp" />
     <ClCompile Include="botter_old.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\3rdParty\inih-master\cpp\INIReader.h" />
+    <ClInclude Include="..\..\3rdParty\inih-master\ini.h" />
     <ClInclude Include="Botter.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Null\Null.vcxproj">
       <Project>{aba32aa6-862a-418c-b160-b7703243ed25}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="config.ini" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

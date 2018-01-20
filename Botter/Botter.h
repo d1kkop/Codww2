@@ -88,6 +88,7 @@ struct IBoneArray
 	virtual Vec3 computeDirTo(const Vec3& camPos, float& distOut) const = 0;
 	virtual Vec3 getPosition() const = 0;
 	virtual Vec3 getTargetPosition() const = 0;
+	virtual float getAngle() const = 0;
 	virtual Vec3 getVelocity() const = 0;
 	virtual u32 getTeam() const = 0;
 	virtual bool isValid() const = 0;
@@ -95,9 +96,11 @@ struct IBoneArray
 	virtual const char* getAddress() const = 0;
 	virtual u32 numBones() const = 0;
 	virtual Vec3 getBonePosition(u32 boneIdx) const = 0;
+	virtual Vec4 getBoneRotation(u32 boneIdx) const = 0;
 	virtual void updateDynamicOffset(u32 offset) = 0;
 	virtual void setAlly(bool isAlly) = 0;
 	virtual bool isAlly() const = 0;
+	virtual float distMoved() const = 0;
 	virtual const MemEntry* getEntry() const = 0;
 };
 
@@ -107,28 +110,38 @@ struct BoneArray2 : public IBoneArray
 public:
 	BoneArray2() : missile(false), valid(false), inview(false), id(-1), memEntry(nullptr),
 		lastInViewCheckTs(0), isMoving(false), startedMovingTs(0), numTimesMoved(0),
-		lastKnownMovedBoneIdx(0), dynOffset(0), ally(false)
+		lastKnownMovedBoneIdx(0), dynOffset(0), ally(false), distTravalled(0), lastUpdateTimeTs(0)
 	{
 	}
 
 	void update() override;
+	void updateInView(float tNow);
+	void updateValidation(float tNow, float dt);
+	void updateInvalidate(float tNow);
+	void updateTargetPoint();
+
+	bool didValidMove() const;
 
 	u32 getId() const override { return id; }
 	Vec3 computeDirTo(const Vec3& camPos, float& distOut) const override;
 	Vec3 getTargetPosition() const override;
 	Vec3 getPosition() const override;
 	Vec3 getVelocity() const override;
+	float getAngle() const override;
 	u32 getTeam() const override;
 	bool isValid() const override;
 	bool inView() const override;
 	const char* getAddress() const override;
-	u32 numBones() const override { return 6; }
+	u32 numBones() const override { return g_numBones; }
 	Vec3 getBonePosition(u32 boneIdx) const override;
+	Vec4 getBoneRotation(u32 boneIdx) const override;
 	void updateDynamicOffset(u32 offset) override;
 	void setAlly(bool isAlly) override { ally = isAlly; }
 	bool isAlly() const override { return ally; }
+	float distMoved() const override { return distTravalled; }
 	const MemEntry* getEntry() const override { return memEntry; }
 
+	float lastUpdateTimeTs;
 	bool missile;
 	bool valid;
 	bool inview;
@@ -146,6 +159,7 @@ public:
 	u32 dynOffset;
 
 	Vec3 targetPos;
+	float distTravalled;
 
 	Array<Vec3> prevBones;
 };
@@ -170,10 +184,12 @@ public:
 	void findBoneArrays();
 	void filterBoneArrays();
 
-	void aim(float dt);
+	void aim(float tNow, float dt);
 	void updateBoneArrays();
 	void updateCamera();
 	void updateAllies();
+
+	void reloadConfig();
 
 
 	u32 numBoneArrays() const { return (u32)m_boneArrays.size(); }
@@ -230,16 +246,19 @@ public:
 	mutable std::mutex m_camMutex;
 	Array<IBoneArray*>  m_boneArrays;
 	GameCamera m_gameCam;
-	const char* m_target; // loose coupling
+	
 	Scan* m_gameCamScan;
 	Scan* m_gameBoneArrayScan;
 	u64 m_gameCamStateInvalidTs;
 	u64 m_gameBoneStateInvalidTs;
-	bool m_wasAiming;
 	u32 m_numValidBoneArrays;
 	u32 m_numInViewBoneArrays;
 	u32 m_uniqueBoneArrayId;
 	u32 m_numBoneRestartTicks;
+
+	const char* m_target; // loose coupling
+	Vec3 m_lastTargetPos;
+	float m_lastTargetTs;
 
 	// loggin
 	File m_log;

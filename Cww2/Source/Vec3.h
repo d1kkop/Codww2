@@ -1,29 +1,6 @@
 #pragma once
 
-
-struct Vec4
-{
-	union
-	{
-		struct { float x, y, z, w; };
-		struct { float m[4]; };
-	};
-	Vec4():x(0),y(0),z(0),w(0) { }
-	Vec4(float _x, float _y, float _z, float _w): 
-		x(_x), y(_y), z(_z), w(_w) { }
-	bool operator == (const Vec4& o) const
-	{
-		return x==o.x && y==o.y && z==o.z && w==o.w;
-	}
-	float length() const { return sqrtf(x*x+y*y+z*z+w*w); }
-	//Vec3 operator* (const Vec3& v) const
-	//{
-	//	Vec3 q(x,y,z);
-	//	Vec3 t =  q.cross(v) * 2.f;
-	//	return v + t * w + q.cross(t);
-	//}
-};
-
+struct Vec4;
 
 
 struct Vec3
@@ -36,7 +13,7 @@ struct Vec3
 	Vec3():x(0),y(0),z(0) { }
 	Vec3(float _x, float _y, float _z): 
 		x(_x), y(_y), z(_z) { }
-	Vec3(const Vec4& v):Vec3(v.x,v.y,v.z) { }
+	Vec3(const Vec4& v);
 	bool operator == (const Vec3& o) const
 	{
 		return x==o.x && y==o.y && z==o.z;
@@ -106,3 +83,30 @@ struct Vec3
 	}
 };
 
+
+struct Vec4
+{
+	union
+	{
+		struct { float x, y, z, w; };
+		struct { float m[4]; };
+	};
+	Vec4():x(0),y(0),z(0),w(0) { }
+	Vec4(float _x, float _y, float _z, float _w): 
+		x(_x), y(_y), z(_z), w(_w) { }
+	bool operator == (const Vec4& o) const
+	{
+		return x==o.x && y==o.y && z==o.z && w==o.w;
+	}
+	float length() const { return sqrtf(x*x+y*y+z*z+w*w); }
+	Vec3 operator* (const Vec3& v) const
+	{
+		Vec3 q(x,y,z);
+		Vec3 t =  q.cross(v) * 2.f;
+		return v + t * w + q.cross(t);
+	}
+};
+
+
+
+inline Vec3::Vec3(const Vec4& v):Vec3(v.x,v.y,v.z) { }
