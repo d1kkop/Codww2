@@ -2,6 +2,8 @@
 
 #include "Botter.h"
 
+u32 SleepTimeMs = 16;
+
 
 void signal_handler(int signal) 
 {

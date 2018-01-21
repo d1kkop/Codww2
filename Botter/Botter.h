@@ -7,7 +7,7 @@ using namespace Null;
 
 
 const u32 g_numBones = 2;
-static u32 SleepTimeMs = 16;
+extern u32 SleepTimeMs;
 
 
 enum class Team
