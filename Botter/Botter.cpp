@@ -711,6 +711,7 @@ void Botter::reloadConfig()
 		CheckAlly = reader.GetBoolean("general", "checkAlly", true);
 		AimVertical = reader.GetBoolean("general", "aimVertical", true);
 		AllyDistance = (float)reader.GetReal("general", "allyDistance", 8.5); // meters
+		SleepTimeMs = reader.GetInteger("general", "sleepTimeMs", 16); // meters
 
 		 // Aim
 		AimDot  = (float) reader.GetReal("aim", "aimDot", .4);

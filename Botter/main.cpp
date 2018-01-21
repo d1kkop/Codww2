@@ -66,7 +66,7 @@ int main(int argc, char** argv)
 		if (!b->gameTick(tickIdx++, lastDt))
 			quit = true;
 
-		sleep_milli(16);
+		sleep_milli(SleepTimeMs);
 	//	sleep_milli(300);
 	//	sleep_milli(90);
 
