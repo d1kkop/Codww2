@@ -6,7 +6,7 @@
 using namespace Null;
 
 
-const u32 g_numBones = 2;
+const u32 g_numBones = 1;
 extern u32 SleepTimeMs;
 
 
@@ -185,6 +185,10 @@ public:
 	void findBoneArrays();
 	void filterBoneArrays();
 
+	u32 isTargetValid( IBoneArray* target ) const;
+	IBoneArray* findBestTarget() const;
+	void resetTarget();
+
 	void aim(float tNow, float dt);
 	void updateBoneArrays();
 	void updateCamera();
@@ -261,7 +265,7 @@ public:
 	const char* m_target; // loose coupling
 	Vec3 m_lastTargetPos;
 	Vec3 m_lastViewDir;
-	float m_lastTargetTs;
+	float m_lastTargetResetTs;
 	bool m_isFocussing;
 
 	// loggin
