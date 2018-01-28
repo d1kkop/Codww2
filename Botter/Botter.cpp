@@ -777,7 +777,7 @@ void Botter::reloadConfig()
 		BoneArrayStartSearch =  reader.GetInteger64("validation", "boneArrayStartSearch", 0x150000000);
 		BoneArrayEndSearch =  reader.GetInteger64("validation", "boneArrayEndSearch", 0x155000000);
 
-		RemoveBoneArrayIfNoProgressFor = (float) reader.GetReal("invalidation", "removeIfNoPrograssFor", 120.f);
+		RemoveBoneArrayIfNoProgressFor = (float) reader.GetReal("invalidation", "removeIfNoProgressFor", 120.f);
 
 
 		log("Reloaded config.ini\n");
