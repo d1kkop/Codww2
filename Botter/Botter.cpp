@@ -5,41 +5,47 @@
 float U2M	   = 1.f/60.f; // unit2metesr
 float M2U	   = (1.f/U2M); // unit2metesr
 
+bool PrintBoneArrays = true;
+bool PrintOnlyValid = true;
 bool LogToFile = false;
 bool AlwaysAim = false;
 bool CheckAlly = true;
 bool AimVertical = false;
 bool AllowSwitching = false;
 bool AllowReject = false;
+float AllyDistance = 10.f; // meters
+float GroupDist = 1.2f;
+u32 CamIndex = 0;
+
 
 // Aim
 float AimDot = .4f;
 float AimDotV = .2f;
 float MaxDst = 45.f;
 float MinDst = 3.0f;
-float AimSpd = 55;
+float AimSpd = 255;
+float AimSpdV = 55;
 float AimZ   = 0.7f * M2U;
 float DistOverDotExp = 2.f;
 float AimPushBackLength = -20.f;
 float MinRetargetTime = .2f;
 float FocusMultiplier = 2.f;
 float VelocityFailThreshold = 1.0f;
-float IdentifyEqualBoneArraysDist = .5f;
-
-// Aim extrapolation
 float AimVelMulplier = 10.f;// 0.01f;
 float AimFollowSoftness = 0.9F;// 0.15f;
+
 
 // If a bone array moves this fast, consider it in valid array
 float VelMoveThreshold = 0.001f; // m/s
 float VelMoveThresholdHi = 6.5f; // m/s
 float ConsiderMovingSpanTime = 0.4f; // seconds
-u32 NumMovesBeforeValid = 3;
-u32 CamIndex = 0;
 float VelMaxValid = 10.f; // m/s
 float MinMoveDist = 5.f; // meters
+u32 NumMovesBeforeValid = 3;
+u32 FilterBoneArrayThreshold = 500;
+u64 BoneArrayStartSearch = 0x150000000;
+u64 BoneArrayEndSearch   = 0x155000000;
 
-float AllyDistance = 10.f; // meters
 
 const u32 BonePreOffset = 4;
 
@@ -53,9 +59,8 @@ T get(const char* p, u32 offset)
 
 // ------------------- Velocity ----------------------------------------------------------------------------------------------------
 
-void Velocity::update(const Vec3& newPos)
+void Velocity::update(const Vec3& newPos, float tNow)
 {
-	float tNow = to_seconds( time_now() );
 	float dt = tNow - lastTs;
 	if ( dt > 0.1f )
 	{
@@ -69,27 +74,24 @@ void Velocity::update(const Vec3& newPos)
 // ------------------- GameCamera ----------------------------------------------------------------------------------------------------
 
 
-void GameCamera::update()
+void GameCamera::update(float dt, float tNow)
 {
-	vel.update(getHeadPos());
+	vel.update(getHeadPos(), tNow);
 }
 
 
 // ------------------- BoneArray2 ----------------------------------------------------------------------------------------------------
 
 
-void BoneArray2::update()
+void BoneArray2::update(float dt, float tNow)
 {
 	if ( missile ) return; // reached impossible velocity 
-
-	float tNow = to_seconds( time_now() );
-	float dt = tNow - lastUpdateTimeTs;
-	lastUpdateTimeTs = tNow;
 
 	if ( dt < 0 ) dt = 0.0001f;
 	if ( dt > 1.f ) dt = 1.f;
 
-	vel.update( getPosition() );
+	setDirty(true);
+	vel.update( getPosition(), tNow );
 
 	if ( prevBones.empty() ) 
 	{
@@ -198,6 +200,8 @@ void BoneArray2::updateInvalidate(float tNow)
 void BoneArray2::updateTargetPoint()
 {
 	Vec3 lookDir = (getBoneRotation(0) * Vec3(0.f, 1, 0));
+	if ( memEntry->typeId != 0 )
+		lookDir = Vec3(0,0,0);
 	Vec3 vel2D   = vel.velocity();
 	vel2D.z = 0.f;
 	Vec3 newTarget = (getPosition() + Vec3(0, 0, AimZ) + lookDir*AimPushBackLength) + (vel2D * U2M * AimVelMulplier);
@@ -207,17 +211,9 @@ void BoneArray2::updateTargetPoint()
 
 bool BoneArray2::didValidMove() const
 {
+	if (0 != Botter::validPosition(getPosition())) return false;
 	float velms = vel.velocity().length() * U2M;
-	return (velms > VelMoveThreshold && velms < VelMoveThresholdHi) && fabs(getAngle()-90) > 0.01f;
-}
-
-Vec3 BoneArray2::computeDirTo(const Vec3& pos, float& distOut) const
-{
-	float dist = getTargetPosition().dist(pos);
-	Vec3 dir   = getTargetPosition() - pos;
-	distOut = dir.length();
-	dir.normalize();
-	return dir;
+	return (velms > VelMoveThreshold && velms < VelMoveThresholdHi);// && fabs(getAngle()-90) > 0.01f;
 }
 
 Vec3 BoneArray2::getTargetPosition() const
@@ -276,27 +272,44 @@ const char* BoneArray2::getAddress() const
 
 Vec3 BoneArray2::getBonePosition(u32 boneIdx) const
 {
+	if (!dirty) return cachePos;
+
 	if ( memEntry )
 	{
-		Bone* b = (Bone*)(memEntry->value.ptr + BonePreOffset + dynOffset);
-		return Vec3((b + boneIdx)->pos);
+		if ( memEntry->typeId == 0 )
+		{
+			Bone* b = (Bone*)(memEntry->value.ptr + BonePreOffset + dynOffset);
+			cachePos = Vec3((b + boneIdx)->pos);
+		} 
+		else
+		{
+			cachePos = *(Vec3*)(memEntry->value.ptr + 0x3C + 16 + dynOffset);
+		}
 	}
-	return Vec3();
+	
+	dirty=false;
+	return cachePos;
 }
 
 Vec4 BoneArray2::getBoneRotation(u32 boneIdx) const
 {
-	if ( memEntry )
+	if ( memEntry && memEntry->typeId == 0 )
 	{
 		Bone* b = (Bone*)(memEntry->value.ptr + BonePreOffset + dynOffset);
 		return (b + boneIdx)->rot;
 	}
-	return Vec4();
+	return Vec4(0, 0, 0, 1);
 }
 
 void BoneArray2::updateDynamicOffset(u32 offset)
 {
 	dynOffset = offset;
+}
+
+Null::u32 BoneArray2::getTypeId() const
+{
+	if ( memEntry ) return memEntry->typeId;
+	return 0;
 }
 
 // ------------------- Botter ----------------------------------------------------------------------------------------------------
@@ -397,21 +410,16 @@ void Botter::boneArraySearch()
 	}
 }
 
-bool Botter::gameTick(u32 tickIdx, float dt)
+bool Botter::gameTick(u32 tickIdx, float dt, float tNow)
 {
-	updateCamera();
-	updateBoneArrays();
+	updateCamera(dt, tNow);
+	updateBoneArrays(dt, tNow);
 
 	if (::GetAsyncKeyState(VK_MENU) & 1) // PRESSED
 	{
 		if ( m_target != nullptr )
 		{
-			IBoneArray* curTarget = fetchCurrentTarget();
-			if ( curTarget != nullptr )
-			{
-				curTarget->setAlly( true );
-				m_target = nullptr;
-			}
+			allyTarget();
 		}
 		else
 		{
@@ -563,15 +571,16 @@ void Botter::findBoneArrays()
 		m_boneArrayScan = nullptr;
 	}
 
-	const u64 startAddr = 0x14B000000;
-	const u64 endAddr   = 0x15F000000;
+	u64 startAddr = BoneArrayStartSearch;
+	u64 endAddr   = BoneArrayEndSearch;
 
 	u64 tNow = time_now();
 
-	u32 scanIdx = m_scanner.newGenericScan(32*g_numBones + BonePreOffset, 4, startAddr, endAddr - startAddr, ValueType::Memory, false,
+	u32 scanIdx = m_scanner.newGenericScan(0x3c+64/* 32*g_numBones + BonePreOffset*/, 4, startAddr, endAddr - startAddr, ValueType::Memory, false,
 										   [&](const char* p, const char* data, u64 ofsInBlock, u64 blockSize)
 	{
-		i32 res = isValidBoneArray(data);
+		u32 type;
+		i32 res = isValidBoneArray(data, type);
 		return res == 0;
 	});
 
@@ -599,24 +608,20 @@ void Botter::filterBoneArrays()
 
 	m_scanner.filterGenericScan( m_boneArrayScan->getId(), 64, 64, [&](const char* newData, const char* oldData, const char* p, u64 ofsInBlock, u64 blockSize, u32& typeId)
 	{
-		u32 res = isValidBoneArray( newData );
+		u32 res = isValidBoneArray( newData, typeId );
 		return res == 0;
 	});
 
 	u64 numEntries = m_scanner.getNumEntries(m_boneArrayScan->getId(), 0);
 	log(str_format("Num bone arrays after filter %lld, time %lld nano\n", numEntries, time_now_nano() - tNow));
 
-	if (numEntries < 900 && numEntries > 0)
+	if (numEntries < FilterBoneArrayThreshold && numEntries > 0)
 	{
 		m_scanner.toMemory(m_boneArrayScan->getId(), 0);
 		log("Bone array's sufficiently filtered.. Starting update..\n");
 		std::lock_guard<std::mutex> lk(m_boneArrayMutex);
 		m_boneArrayState = MemoryState::Wait;
-		if (m_gameBoneArrayScan) m_scanner.deleteScan(m_gameBoneArrayScan->getId());
-		m_gameBoneArrayScan = m_boneArrayScan;
-		m_boneArrayScan = nullptr;
-		for (auto& ba : m_boneArrays) delete ba;
-		m_boneArrays.clear();
+		m_boneArrayRefreshed = true;
 	}
 	
 	if (numEntries == 0)
@@ -626,7 +631,7 @@ void Botter::filterBoneArrays()
 	}
 }
 
-void Botter::updateCamera()
+void Botter::updateCamera(float dt, float tNow)
 {
 	m_gameCam.valid = false;
 
@@ -650,7 +655,7 @@ void Botter::updateCamera()
 
 	u32 updateIdx = 0;
 	if (CamIndex < m_gameCamScan->numEntries())
-		updateIdx = 1;
+		updateIdx = CamIndex;
 
 	// see if can update
 	if (!m_scanner.updateEntry(m_gameCamScan->getId(), updateIdx))
@@ -668,9 +673,9 @@ void Botter::updateCamera()
 		m_gameCam.valid = false;
 		if (0 == m_gameCamStateInvalidTs)
 		{
-			m_gameCamStateInvalidTs = time_now();
+			m_gameCamStateInvalidTs = tNow;
 		}
-		else if (time_now() - m_gameCamStateInvalidTs > 1000)
+		else if (tNow - m_gameCamStateInvalidTs > 1000)
 		{
 			log(str_format("WARNING: Camera no longer valid (Error %d), refinding..\n", iRes));
 			fnCleanupAndResetSearch();
@@ -679,10 +684,10 @@ void Botter::updateCamera()
 	}
 
 	// Cam is valid, reset invalid ts if was invalid previously
-	m_gameCamStateInvalidTs = time_now();
+	m_gameCamStateInvalidTs = tNow;
 
 	m_gameCam.entry = entry;
-	m_gameCam.update();
+	m_gameCam.update(dt, tNow);
 	m_gameCam.valid = true;
 }
 
@@ -705,6 +710,23 @@ void Botter::updateAllies()
 	}
 }
 
+void Botter::allyTarget()
+{
+	IBoneArray* curTarget = fetchCurrentTarget();
+	if ( curTarget != nullptr )
+	{
+		forAllBoneArraysInRange( GroupDist*M2U, curTarget, [&](IBoneArray* ba)
+		{
+			if (ba->isValid() && ba->inView())
+			{
+				ba->setAlly(true);
+			}
+		});
+		curTarget->setAlly( true );
+		m_target = nullptr;
+	}
+}
+
 void Botter::reloadConfig()
 {
 	INIReader reader("config.ini");
@@ -715,6 +737,9 @@ void Botter::reloadConfig()
 	}
 	else
 	{ // Read settings from ini
+
+		PrintBoneArrays = reader.GetBoolean("general", "printBoneArrays", true);
+		PrintOnlyValid = reader.GetBoolean("general", "printOnlyValid", true);
 		LogToFile = reader.GetBoolean("general", "logToFile", false);
 		AlwaysAim = reader.GetBoolean("general", "alwaysAim", false);
 		CheckAlly = reader.GetBoolean("general", "checkAlly", true);
@@ -722,7 +747,8 @@ void Botter::reloadConfig()
 		AllowSwitching = reader.GetBoolean("general", "allowSwitching", true);
 		AllowReject  = reader.GetBoolean("general", "allowReject", true);
 		AllyDistance = (float)reader.GetReal("general", "allyDistance", 8.5); // meters
-		SleepTimeMs = reader.GetInteger("general", "sleepTimeMs", 16); // meters
+		GroupDist = (float)reader.GetReal("general", "groupDist", 1.2f);
+		DesiredTickRate = reader.GetInteger("general", "desiredTickRate", 80); // meters
 		CamIndex = reader.GetInteger("general", "camIndex", 0);
 		
 		 // Aim
@@ -731,6 +757,7 @@ void Botter::reloadConfig()
 		MaxDst  = (float)reader.GetReal("aim", "maxDst", 45);
 		MinDst  = (float)reader.GetReal("aim", "minDst", 3);
 		AimSpd  = (float)reader.GetReal("aim", "aimSpd", 255);
+		AimSpdV = (float)reader.GetReal("aim", "aimSpdV", 55);
 		AimZ    = (float)reader.GetReal("aim", "aimZ", .7) * M2U;
 		AimPushBackLength = (float)reader.GetReal("aim", "aimPushBackLength", .3) * M2U;
 		DistOverDotExp = (float)reader.GetReal("aim", "distOverDotExp", 2.f);
@@ -739,7 +766,7 @@ void Botter::reloadConfig()
 		MinRetargetTime = (float)reader.GetReal("aim", "minRetargetTime", .2);
 		FocusMultiplier = (float)reader.GetReal("aim", "focusMultiplier", 2.5f);
 		VelocityFailThreshold = (float)reader.GetReal("aim", "velocityFailThreshold", 1.0f);
-		IdentifyEqualBoneArraysDist = (float)reader.GetReal("aim", "identifyEqualBoneArraysDist", .5f);
+		
 
 		// If a bone array moves this fast, consider it in valid array
 		VelMoveThreshold = (float)reader.GetReal("validation", "velMoveThreshold", .001); // m/s
@@ -747,22 +774,45 @@ void Botter::reloadConfig()
 		ConsiderMovingSpanTime = (float)reader.GetReal("validation", "considerMovingSpanTime", 0.4); // seconds
 		NumMovesBeforeValid = reader.GetInteger("validation", "numMovesBeforeValid", 5);
 		MinMoveDist = (float) reader.GetReal("validation", "minMoveDist", 5);
+		FilterBoneArrayThreshold =  reader.GetInteger("validation", "filterBoneArrayThreshold", 1500);
+		BoneArrayStartSearch =  reader.GetInteger64("validation", "boneArrayStartSearch", 0x150000000);
+		BoneArrayEndSearch =  reader.GetInteger64("validation", "boneArrayEndSearch", 0x155000000);
+
 
 		log("Reloaded config.ini\n");
 	}
 }
 
-void Botter::updateBoneArrays()
+void Botter::updateBoneArrays(float dt, float tNow)
 {
 	if ( !m_gameCam.valid ) return;
 
 	// shared acces
-	std::lock_guard<std::mutex> lk(m_boneArrayMutex);
+	{
+		std::lock_guard<std::mutex> lk(m_boneArrayMutex);
+		if (m_boneArrayRefreshed && m_boneArrayState == MemoryState::Wait)
+		{
+			if (m_gameBoneArrayScan)
+			{
+				// delete old
+				m_scanner.deleteScan(m_gameBoneArrayScan->getId());
+				m_gameBoneArrayScan = nullptr;
+			}
+
+			m_gameBoneArrayScan = m_boneArrayScan;
+			m_boneArrayScan = nullptr;
+		}
+	}
+
 	if (!m_gameBoneArrayScan) return;
 
-	// rebuild them
-	if ( m_boneArrays.empty() )
+	if ( m_boneArrayRefreshed )
 	{
+		// delete old
+		for (auto& ba : m_boneArrays) delete ba;
+		m_boneArrays.clear();
+
+		// build new
 		m_gameBoneArrayScan->forEachEntry( [&](MemEntry& entry)
 		{
 			BoneArray2* ba = new BoneArray2();
@@ -771,13 +821,15 @@ void Botter::updateBoneArrays()
 			m_boneArrays.emplace_back(ba);
 			return true; // continue iterating
 		} );
+
+		m_boneArrayRefreshed = false;
 	}
 
 	// update bone array
 	u32 numUpdated = m_scanner.updateEntries(m_gameBoneArrayScan->getId(), 16, 16,
 											 [&](const char*p, u64 ofsInBlock, const char* newData, const char* oldData, u32& typeId)
 	{
-		i32 res = isValidBoneArray(newData);
+		i32 res = isValidBoneArray(newData, typeId);
 		if ( res != 0 )
 		{
 			return false; // remove (hint for now), unless some upper or lower offsets do match
@@ -801,7 +853,7 @@ void Botter::updateBoneArrays()
 	
 	for (auto* barray : m_boneArrays)
 	{
-		barray->update();
+		barray->update(dt, tNow);
 	}
 
 	// count num valid boneArrays
@@ -814,10 +866,10 @@ void Botter::updateBoneArrays()
 	}
 
 	// sort on dist travalled
-	std::sort( m_boneArrays .begin(), m_boneArrays.end(), [&](auto l, auto r)
-	{
-		return l->distMoved() > r->distMoved();
-	});
+	//std::sort( m_boneArrays .begin(), m_boneArrays.end(), [&](auto l, auto r)
+	//{
+	//	return l->distMoved() > r->distMoved();
+	//});
 	
 }
 
@@ -844,7 +896,7 @@ IBoneArray* Botter::findBestTarget() const
 	float closest = FLT_MAX;
 	float eqDist  = FLT_MAX;
 	IBoneArray* best = nullptr;
-	printf("begin\n");
+	//printf("begin\n");
 	for (auto& p : m_boneArrays)
 	{
 		u32 res = isTargetValid(p);
@@ -855,35 +907,32 @@ IBoneArray* Botter::findBestTarget() const
 		}
 
 		float dist;
-		Vec3 dir = p->computeDirTo(ownPos, dist);
+		Vec3 dir = (p->getPosition()-ownPos);
+		dist = dir.length();
+		dir  *= (1.f/dist);
 		dist *= U2M;
 
 		float hDot = dir.dot(viewDir);
 		float vDot = fabs(dir.dot(upDir));
 
 		float fDist = dist + (1.f - fabs(hDot)) * powf(dist, DistOverDotExp);
-		//	printf("Dist %.3f\n", dist);
+		float curZ  = p->getPosition().z;
+		float bestZ = best ? best->getPosition().z : FLT_MIN;
 
 		if ((dist > MinDst && dist < MaxDst) && 
 			(hDot > AimDot && vDot < AimDotV) &&
-			fDist < closest)  // find closest in aim range
+			(fDist < closest))
 		{
-			// do not overwrite 'equal bone arrays', that is, player is built up from multiple bone arrays which have roughly
-			// the same position, from these 'equal arrays' take the one with the highest Z value (around spine)
-			if ( best && fabs( dist - eqDist ) < IdentifyEqualBoneArraysDist && p->getPosition().z < best->getPosition().z )
-			{
-				continue; // do not overwrite
-			}
-			printf("Setting ID %d was %d\n", p->getId(), best?best->getId():-1);
+	//		printf("Setting ID %d was %d\n", p->getId(), best?best->getId():-1);
 			best = p;
 			closest = fDist;
-			eqDist = dist;
+			eqDist  = dist;
 		}
-		else
-		{
-			printf("Skipping because: dist = %.3f, hDot = %.3f vDot = %.3f fdist = %.3f, closest %.3f, %d %d %d %d %d\n", dist, hDot, vDot, fDist, closest,
-				   (dist > MinDst), (dist < MaxDst), (hDot > AimDot), (vDot < AimDotV), (fDist < closest));
-		}
+		//else
+		//{
+		//	printf("Skipping because: dist = %.3f, hDot = %.3f vDot = %.3f fdist = %.3f, closest %.3f, %d %d %d %d %d\n", dist, hDot, vDot, fDist, closest,
+		//		   (dist > MinDst), (dist < MaxDst), (hDot > AimDot), (vDot < AimDotV), (fDist < closest));
+		//}
 	}
 	return best;
 }
@@ -908,8 +957,6 @@ void Botter::aim(float tNow, float dt)
 	Vec3 sideDir   = viewDir.cross(upDir);
 	Vec3 ownPos    = m_gameCam.getHeadPos();
 
-	std::lock_guard<std::mutex> lk(m_boneArrayMutex);
-
 	// See if target is still valid
 	IBoneArray* curTarget = nullptr;
 	if (m_target)
@@ -925,15 +972,15 @@ void Botter::aim(float tNow, float dt)
 			// loose target if got killed (dist since last update is more than some meters)
 			// or if not moving anymore
 			float dist = curTarget->getPosition().dist(m_lastTargetPos) * U2M;
-			if ( dist > 25.f )
+			if ( (dist > 25.f) || (curTarget->getVelocity().length() < VelocityFailThreshold) || (CheckAlly && curTarget->isAlly()) )
 			{
 				resetTarget();
-				printf("Lost target\n");
+				Botter::log("Lost target\n");
 			}
 		}
 		else 
 		{
-			printf("Fetch FAILED\n");
+			Botter::log("Fetch FAILED\n");
 			resetTarget();
 		}
 
@@ -943,7 +990,7 @@ void Botter::aim(float tNow, float dt)
 			IBoneArray* curBest = findBestTarget();
 			if ( curBest != curTarget && curBest != nullptr )
 			{
-				printf("Switching target\n");
+				Botter::log("Switching target\n");
 				resetTarget();
 			}
 		}
@@ -952,7 +999,7 @@ void Botter::aim(float tNow, float dt)
 		if (!m_target && (tNow - m_lastTargetResetTs < MinRetargetTime) )
 		{
 			// do not aim
-			printf("Not aiming, not allowed yet..\n");
+			Botter::log("Not aiming, not allowed yet..\n");
 			return;
 		}
 	}
@@ -964,14 +1011,26 @@ void Botter::aim(float tNow, float dt)
 		curTarget = findBestTarget();
 		if ( curTarget )
 		{
-			printf("Found new target: ID %d\n", curTarget->getId());
+			Botter::log(str_format("Found new target: ID %d\n", curTarget->getId()));
 			m_target = curTarget->getAddress();
 		}
 	}
 
 	if (curTarget)
 	{
-		m_lastTargetPos = curTarget->getPosition();
+		//Vec3 avgTargetPos = curTarget->getPosition();
+		//float range = GroupDist*M2U;
+		//float k=0.f;
+		//forAllBoneArraysInRange( range, curTarget, [&](IBoneArray* ba)
+		//{
+		//	if ( ba->isValid() && ba->inView() )
+		//	{
+		//		k++;
+		//		avgTargetPos += ba->getPosition();
+		//	}
+		//});
+		//avgTargetPos *= (1.f/(k+1));
+		m_lastTargetPos = curTarget->getTargetPosition();
 
 		// skip aim if we sent mouse input but our view dir did not get adjusted.
 		// this is to prevent a bug that we keep sending mouse input even if the view dir does not change
@@ -984,11 +1043,13 @@ void Botter::aim(float tNow, float dt)
 		m_lastViewDir = viewDir;
 
 		// cur aim speed
-		float aimSpeed = AimSpd * (m_isFocussing ? FocusMultiplier : 1.f);
+		float aimSpeed  = AimSpd * (m_isFocussing ? FocusMultiplier : 1.f);
+		float aimSpeedV = AimSpdV * (m_isFocussing ? FocusMultiplier : 1.f);
 	//	printf("Aimspeed %.3f \n", aimSpeed);
 
-		float dist;
-		Vec3 dir	= curTarget->computeDirTo(ownPos, dist);
+		Vec3 dir  = (m_lastTargetPos - ownPos);
+		dir.normalize();
+
 		float kSide = dir.dot(sideDir);
 		float kUp   = -dir.dot(upDir);
 		INPUT input;
@@ -998,7 +1059,7 @@ void Botter::aim(float tNow, float dt)
 		input.mi.dx = (LONG)(kSide*aimSpeed);
 		if ( AimVertical )
 		{
-			input.mi.dy = (LONG)(kUp*aimSpeed);
+			input.mi.dy = (LONG)(kUp*aimSpeedV);
 		}
 		SendInput(1, &input, sizeof(INPUT)); 
 	//	log(str_format("Aiming at target id %d, dist %3fm\n", curTarget->getId(), dist*U2M));
@@ -1016,6 +1077,21 @@ IBoneArray* Botter::fetchCurrentTarget() const
 		}
 	}
 	return nullptr;
+}
+
+void Botter::forAllBoneArraysInRange(float range, const IBoneArray* from, const std::function<void( IBoneArray*)>& cb)
+{
+	if (!m_gameCam.valid) return;
+	Vec3 camPos = m_gameCam.getPosition();
+	float danchor = from->getPosition().dist(camPos);
+	for ( auto& ba : m_boneArrays )
+	{
+		float d = ba->getPosition().dist(camPos);
+		if ( fabs(d - danchor) <= range )
+		{
+			cb( ba );
+		}
+	}
 }
 
 void Botter::printCameraStats() const
@@ -1068,13 +1144,13 @@ void Botter::printBoneArrays() const
 
 void Botter::printBoneArraysSimple() const
 {
+	if (!PrintBoneArrays) return;
 	std::lock_guard<std::mutex> lk(m_camMutex);
 	if (!m_gameCam.valid) return;
-	std::lock_guard<std::mutex> lk2(m_boneArrayMutex);
 	u32 idx = 0;
 	for (const IBoneArray* p : m_boneArrays)
 	{
-	//	if ( p->isValid() )
+		if ( !PrintOnlyValid || p->isValid() )
 		{
 			Vec3 pos = p->getTargetPosition();
 			Vec3 vel = p->getVelocity();
@@ -1082,8 +1158,9 @@ void Botter::printBoneArraysSimple() const
 			float ang = p->getAngle();
 			float dist = pos.dist(m_gameCam.getHeadPos());
 			float dMoved = p->distMoved();
-			log(str_format("%p | %d | %d | valid %s | visb %s | %.3f %.3f %.3f | %.3fms | Dst %.3f | Ang %.3f | Moved %.3fM\n",
-							p->getAddress(), idx, p->getId(), (p->isValid()?"yes":"no"), (p->inView()?"yes":"no"),
+			u32 typeId = p->getTypeId();
+			log(str_format("%p | %d | %d | tid %d | valid %s | visb %s | %.3f %.3f %.3f | %.3fms | Dst %.3f | Ang %.3f | Moved %.3fM\n",
+							p->getAddress(), idx, p->getId(), typeId, (p->isValid()?"yes":"no"), (p->inView()?"yes":"no"),
 							pos.x, pos.y, pos.z, vel.length()*U2M, dist*U2M, ang, dMoved));
 			idx++;
 		}
@@ -1171,7 +1248,7 @@ u32 Botter::isValidPlayerBot(const char* data) const
 	return 0;
 }
 
-Null::u32 Botter::isValidBoneArray(const char* data) const
+Null::u32 Botter::isValidBoneArray(const char* data, u32& type) const
 {
 	u32 iAnchor = *(u32*)(data + 0);
 	if (!(iAnchor >= 0x3F7FFFFE && iAnchor <= 0x3F800000)) return -77;// ||  iAnchor == 0)) return -77;
@@ -1179,49 +1256,64 @@ Null::u32 Botter::isValidBoneArray(const char* data) const
 	//u32 aOffs = 10;
 	//if (!(iAnchor >= 0x3F7FFFFE && iAnchor <= 0x3F800000)) return -77;// ||  iAnchor == 0)) return -77;
 
+	type = 0;
+	i32 res=0;
 	Bone* b = (Bone*)(data + BonePreOffset);
 	for (u32 i = 0; i < g_numBones; i++, b++)
 	{
-		i32 res = validPosition(b->pos);
-		if (res != 0) return res;
+		res = validPosition(b->pos);
+		if (res != 0) break;
 		res = validQuat(b->rot);
-		if (res != 0) return res;
+		if (res != 0) break;
 		//if ( fabs(b->pos.w) > 0.01f ) return -95; // THIS HAPPENS!!
 	}
 
-	// check distances of bones
-	b = (Bone*)(data + BonePreOffset);
-	Vec3 anchor = b->pos;
-	b++; // go next bone
-	for (u32 i = 1; i < g_numBones ; i++, b++)
+	if ( res != 0 )
 	{
-		Vec3 pos = b->pos;
-		float dist = pos.dist(anchor)*U2M;
-		if ( dist > 5.f ) return -250;
-	//	if ( dist < 0.001f ) return -251;
+		if ( iAnchor != 0x3F800000 ) return -78;
+		Vec3 pos = *(Vec3*)(data + 0x3C);
+		res = validPosition(pos);
+		if (res != 0) return res;
+		pos = *(Vec3*)(data + 0x3C + 16);
+		res = validPosition(pos);
+		if (res != 0) return res;
+		type = 1;
 	}
+
+	// check distances of bones
+	//b = (Bone*)(data + BonePreOffset);
+	//Vec3 anchor = b->pos;
+	//b++; // go next bone
+	//for (u32 i = 1; i < g_numBones ; i++, b++)
+	//{
+	//	Vec3 pos = b->pos;
+	//	float dist = pos.dist(anchor)*U2M;
+	//	if ( dist > 5.f ) return -250;
+	////	if ( dist < 0.001f ) return -251;
+	//}
 
 	return 0;
 }
 
-bool Botter::nearZero(float f) const
+bool Botter::nearZero(float f)
 {
 	return f >= -0.01f && f <= 0.01f;
 	//return (f > -20.101f && f < 20.101f);
 }
 
-bool Botter::nearZero(Vec3 f) const
+bool Botter::nearZero(Vec3 f)
 {
+	//return fabs(f.x)+fabs(f.y)+fabs(f.z) < 50;
 	return f.length() < 20.f;
 	//return nearZero(f.x) && nearZero(f.y) && nearZero(f.z);
 }
 
-bool Botter::isSmall(float f) const
+bool Botter::isSmall(float f)
 {
 	return f > -50 && f < 50;
 }
 
-bool Botter::isSmall(Vec3 f) const
+bool Botter::isSmall(Vec3 f)
 {
 //	return isSmall(f.x) || isSmall(f.y) || isSmall(f.z);
 	u32 t=0;
@@ -1237,7 +1329,7 @@ bool Botter::isSmall(Vec3 f) const
 	//	   (!isSmall(f.x) && isSmall(f.y) && isSmall(f.z));	
 }
 
-bool Botter::isSimilar(Vec3 f) const
+bool Botter::isSimilar(Vec3 f)
 {
 	float dx = fabs( f.x-f.y );
 	float dy = fabs( f.x-f.z );
@@ -1249,12 +1341,12 @@ bool Botter::isSimilar(Vec3 f) const
 	return t >= 1;
 }
 
-bool Botter::zOrNorm(float f) const
+bool Botter::zOrNorm(float f)
 {
 	return isnormal(f) || f==0.f;
 }
 
-bool Botter::isIntegral(float f) const
+bool Botter::isIntegral(float f)
 {
 	//return false;
 //	return ((float)i32(f)) == f;
@@ -1265,12 +1357,12 @@ bool Botter::isIntegral(float f) const
 	return float(i32(fd)) == fd;
 }
 
-bool Botter::isValidInt(i32 i) const
+bool Botter::isValidInt(i32 i)
 {
 	return i >= -1000 && i <= 1000;
 }
 
-u32 Botter::insideWorld(float f) const
+u32 Botter::insideWorld(float f)
 {
 	if ( f < -10000.f ) return -50;
 	if ( f > 10000.f ) return -51;
@@ -1280,18 +1372,19 @@ u32 Botter::insideWorld(float f) const
 	return 0;
 }
 
-bool Botter::validUp(float f) const
+bool Botter::validUp(float f)
 {
 	return f >= -1500 && f < 3000 && isnormal(f); // zOrNorm(f);
 	//return (f >= -50.f && f <= 1300.f) /* !isIntegral(f)*/ && zOrNorm(f);
 }
 
-u32 Botter::validPosition(const Vec3& pos) const
+u32 Botter::validPosition(const Vec3& pos)
 {
 	// if ( nearZero(pos) ) return -6;
 	Vec3 pos2D = pos;
 	pos2D.z = 0.f;
 	if ( nearZero(pos2D) ) return -6;
+	//if ( fabs(pos2D.x) < 35 ) return -7;
 	u32 res = insideWorld(pos.x);
 	if (res != 0) return res;
 	res = insideWorld(pos.y);
@@ -1316,7 +1409,7 @@ void Botter::log(const String& msg)
 	}
 }
 
-u32 Botter::validQuat(const Vec4& q) const
+u32 Botter::validQuat(const Vec4& q)
 {
 	float l = q.length();
 	if ( !(l >= 0.85f && l <= 1.15f) ) return -100;
@@ -1325,7 +1418,7 @@ u32 Botter::validQuat(const Vec4& q) const
 	return 0;
 }
 
-bool Botter::validVector(const Vec3& v) const
+bool Botter::validVector(const Vec3& v)
 {
 	float l = v.length();
 	return l >= 0.95f && l <= 1.05f && isnormal(l) && 

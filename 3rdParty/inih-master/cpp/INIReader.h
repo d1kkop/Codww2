@@ -32,6 +32,10 @@ public:
     // not found or not a valid integer (decimal "1234", "-1234", or hex "0x4d2").
     long GetInteger(const std::string& section, const std::string& name, long default_value) const;
 
+	// Get an integer (long long) value from INI file, returning default_value if
+	// not found or not a valid integer (decimal "1234", "-1234", or hex "0x4d2").
+	long long GetInteger64(const std::string& section, const std::string& name, long long default_value) const;
+
     // Get a real (floating point double) value from INI file, returning
     // default_value if not found or not a valid floating point value
     // according to strtod().

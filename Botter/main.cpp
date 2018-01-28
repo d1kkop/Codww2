@@ -2,7 +2,7 @@
 
 #include "Botter.h"
 
-u32 SleepTimeMs = 16;
+u32 DesiredTickRate = 80;
 
 
 void signal_handler(int signal) 
@@ -40,6 +40,7 @@ int main(int argc, char** argv)
 		u64 tstart = time_now();
 		lastDt = to_seconds(tstart - tlast);
 		tlast  = tstart;
+		float tNow = to_seconds(tlast);
 
 		// every x seconds, show tick rate of bot
 		if (to_seconds(tstart - tdisplay) >= 3.f)
@@ -47,7 +48,7 @@ int main(int argc, char** argv)
 			tdisplay = tstart;
 			
 			//b->printBoneArrays();
-			b->log(str_format("\n---- Tick rate is: %.3f num ticks: %d-----\n", 1.f/lastDt, tickIdx));
+			b->log(str_format("\n---- Tick rate is: %.3f dt: %.3f time %.3f num ticks: %d-----\n", 1.f/lastDt, lastDt, tNow, tickIdx));
 			b->printCameraStats();
 			b->log(str_format("---- BoneArrays %d | Valid %d | Inview %d -----\n", b->numBoneArrays(), b->numValidBoneArrays(), b->numInViewBoneArrays() ));
 			b->printBoneArraysSimple();
@@ -65,12 +66,12 @@ int main(int argc, char** argv)
 			continue;
 		}
 
-		if (!b->gameTick(tickIdx++, lastDt))
+		if (!b->gameTick(tickIdx++, lastDt, tNow))
 			quit = true;
 
-		sleep_milli(SleepTimeMs);
-	//	sleep_milli(300);
-	//	sleep_milli(90);
+		u64 elapsed  = time_now() - tlast;
+		i64 waitTime = (1000/DesiredTickRate) - elapsed;
+		if (waitTime>0) sleep_milli(waitTime);
 
 	//	if (GetAsyncKeyState(VK_END) & 1) 
 	//		quit = true;

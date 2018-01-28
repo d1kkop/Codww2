@@ -40,6 +40,17 @@ long INIReader::GetInteger(const string& section, const string& name, long defau
     return end > value ? n : default_value;
 }
 
+
+long long INIReader::GetInteger64(const std::string& section, const std::string& name, long long default_value) const
+{
+	string valstr = Get(section, name, "");
+	const char* value = valstr.c_str();
+	char* end;
+	// This parses "1234" (decimal) and also "0x4D2" (hex)
+	long long n = strtoll(value, &end, 0);
+	return end > value ? n : default_value;
+}
+
 double INIReader::GetReal(const string& section, const string& name, double default_value) const
 {
     string valstr = Get(section, name, "");

@@ -6,8 +6,8 @@
 using namespace Null;
 
 
-const u32 g_numBones = 1;
-extern u32 SleepTimeMs;
+const u32 g_numBones = 2;
+extern u32 DesiredTickRate;
 
 
 enum class Team
@@ -42,7 +42,7 @@ struct Velocity
 	//	vel = Vec3(1000, 1000, 1000);
 	}
 
-	void update(const Vec3& newPos);
+	void update(const Vec3& newPos, float tNow);
 	Vec3 velocity() const { return vel; }
 
 private:
@@ -62,7 +62,7 @@ struct GameCamera
 	template <typename T>
 	T at(u32 offset) const { return *(T*)(entry->value.ptr + offset); }
 
-	void update();
+	void update(float dt, float tNow);
 	Vec3 getPosition()		const { return at<Vec3>(0);  }
 	Vec3 getFacing()		const { return at<Vec3>(16); }
 	Vec3 getHeadPos()		const { return at<Vec3>(32); }
@@ -85,8 +85,7 @@ private:
 struct IBoneArray
 {
 	virtual u32 getId() const = 0;
-	virtual void update() = 0;
-	virtual Vec3 computeDirTo(const Vec3& camPos, float& distOut) const = 0;
+	virtual void update(float dt, float tNow) = 0;
 	virtual Vec3 getPosition() const = 0;
 	virtual Vec3 getTargetPosition() const = 0;
 	virtual float getAngle() const = 0;
@@ -103,6 +102,8 @@ struct IBoneArray
 	virtual bool isAlly() const = 0;
 	virtual float distMoved() const = 0;
 	virtual const MemEntry* getEntry() const = 0;
+	virtual u32 getTypeId() const = 0;
+	virtual void setDirty(bool dirty) = 0;
 };
 
 
@@ -111,11 +112,12 @@ struct BoneArray2 : public IBoneArray
 public:
 	BoneArray2() : missile(false), valid(false), inview(false), id(-1), memEntry(nullptr),
 		lastInViewCheckTs(0), isMoving(false), startedMovingTs(0), numTimesMoved(0),
-		lastKnownMovedBoneIdx(0), dynOffset(0), ally(false), distTravalled(0), lastUpdateTimeTs(0)
+		lastKnownMovedBoneIdx(0), dynOffset(0), ally(false), distTravalled(0)
 	{
+		dirty=true;
 	}
 
-	void update() override;
+	void update(float dt, float tNow) override;
 	void updateInView(float tNow);
 	void updateValidation(float tNow, float dt);
 	void updateInvalidate(float tNow);
@@ -124,7 +126,6 @@ public:
 	bool didValidMove() const;
 
 	u32 getId() const override { return id; }
-	Vec3 computeDirTo(const Vec3& camPos, float& distOut) const override;
 	Vec3 getTargetPosition() const override;
 	Vec3 getPosition() const override;
 	Vec3 getVelocity() const override;
@@ -141,8 +142,9 @@ public:
 	bool isAlly() const override { return ally; }
 	float distMoved() const override { return distTravalled; }
 	const MemEntry* getEntry() const override { return memEntry; }
+	u32 getTypeId() const override ;
+	void setDirty(bool _dirty) override { dirty=_dirty; }
 
-	float lastUpdateTimeTs;
 	bool missile;
 	bool valid;
 	bool inview;
@@ -162,6 +164,10 @@ public:
 	Vec3 targetPos;
 	float distTravalled;
 
+	// cache
+	mutable bool dirty;
+	mutable Vec3 cachePos;
+
 	Array<Vec3> prevBones;
 };
 
@@ -177,7 +183,7 @@ public:
 
 	void cameraSearch();		// seperate thread
 	void boneArraySearch();		// seperate thread
-	bool gameTick(u32 tickIdx, float dt);	// main thread
+	bool gameTick(u32 tickIdx, float dt, float tNow);	// main thread
 	
 	void findCamera();
 	void filterCamera();
@@ -190,9 +196,10 @@ public:
 	void resetTarget();
 
 	void aim(float tNow, float dt);
-	void updateBoneArrays();
-	void updateCamera();
+	void updateBoneArrays(float dt, float tNow);
+	void updateCamera(float dt, float tNow);
 	void updateAllies();
+	void allyTarget();
 
 	void reloadConfig();
 
@@ -208,6 +215,7 @@ public:
 	}
 
 	IBoneArray* fetchCurrentTarget() const;
+	void forAllBoneArraysInRange( float range, const IBoneArray* from, const std::function<void ( IBoneArray*)>& cb );
 	void printCameraStats() const;
 	void printCameraStats(Vec3 p, Vec3 f, Vec3 up, Vec3 head, Vec3 vel) const;
 	void printBoneArrays() const;
@@ -218,22 +226,22 @@ public:
 	// higher level type
 	i32 isValidCamera(const char* data) const;
 	u32 isValidPlayerBot(const char* data) const;
-	u32 isValidBoneArray(const char* data) const;
+	u32 isValidBoneArray(const char* data, u32& type) const;
 
 	// generic
-	bool nearZero(float f) const;
-	bool nearZero(Vec3 f) const;
-	bool isSmall(float f) const;
-	bool isSmall(Vec3 f) const;
-	bool isSimilar(Vec3 f) const;
-	bool zOrNorm(float f) const;
-	bool isIntegral(float f) const;
-	bool isValidInt(i32 i) const;
-	u32 insideWorld(float f) const;
-	bool validUp(float f) const;
-	u32 validPosition(const Vec3& p) const;
-	u32 validQuat(const Vec4& q) const;
-	bool validVector(const Vec3& v) const;
+	static bool nearZero(float f);
+	static bool nearZero(Vec3 f);
+	static bool isSmall(float f);
+	static bool isSmall(Vec3 f);
+	static bool isSimilar(Vec3 f);
+	static bool zOrNorm(float f);
+	static bool isIntegral(float f);
+	static bool isValidInt(i32 i);
+	static u32 insideWorld(float f);
+	static bool validUp(float f);
+	static u32 validPosition(const Vec3& p);
+	static u32 validQuat(const Vec4& q);
+	static bool validVector(const Vec3& v);
 
 	static void log(const String& msg);
 
@@ -246,6 +254,7 @@ public:
 	Scan* m_boneArrayScan;
 	std::atomic< MemoryState > m_cameraState;
 	std::atomic< MemoryState > m_boneArrayState;
+	std::atomic< bool > m_boneArrayRefreshed;
 
 	// in main thread
 	mutable std::mutex m_boneArrayMutex;
@@ -255,8 +264,8 @@ public:
 	
 	Scan* m_gameCamScan;
 	Scan* m_gameBoneArrayScan;
-	u64 m_gameCamStateInvalidTs;
-	u64 m_gameBoneStateInvalidTs;
+	float m_gameCamStateInvalidTs;
+	float m_gameBoneStateInvalidTs;
 	u32 m_numValidBoneArrays;
 	u32 m_numInViewBoneArrays;
 	u32 m_uniqueBoneArrayId;

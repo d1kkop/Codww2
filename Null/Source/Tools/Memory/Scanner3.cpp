@@ -227,11 +227,12 @@ namespace Null
 		std::lock_guard<std::recursive_mutex> lk(m_scansMutex);
 		if (!m_handle) return -1;
 		if (!(vt == ValueType::Memory || vt == ValueType::String) && pattern_size > 8) return -2; // invalid size
-		u64 readBytes = 0;
+		u64 endOffset = offset + maxScanLength;
 		u64 offsetRegion = 0; // same as other offset but needs seperate counter for first lamda callback
 		Scan* s = createScan(alignment, pattern_size, vt, allowToDisk);
 		ProcUtil::enumerateProcessMemory(m_handle, offset, [&](char* baseAddress, u64 size, bool& alloc)
 		{
+			if ((u64)baseAddress > endOffset) return false; // stop
 			if (!preBlockScanCallback)
 			{
 				alloc = true;
@@ -245,6 +246,7 @@ namespace Null
 		{
 			for (u64 offs=0; offs+pattern_size <= size; )
 			{
+				if ((u64)baseAddress+offs > endOffset) return false; // stop
 				char* data = dataCpy + offs;
 				bool bKeepData = filterCallback(baseAddress, data, offs, size);
 				if ( bKeepData)
@@ -262,9 +264,7 @@ namespace Null
 			}
 			bFree = true;
 			offset += size;
-			readBytes += size;
-			bool bContinueScanning = (readBytes <= maxScanLength);
-			return bContinueScanning;
+			return true; // continue scanning
 		});
 		if (s->allowToDisk) writeToDisk(s->id, s->numFiles++, true);
 		return s->id;
