@@ -104,23 +104,25 @@ struct IBoneArray
 	virtual const MemEntry* getEntry() const = 0;
 	virtual u32 getTypeId() const = 0;
 	virtual void setDirty(bool dirty) = 0;
+	virtual bool isDead() const = 0;
 };
 
 
 struct BoneArray2 : public IBoneArray
 {
 public:
-	BoneArray2() : missile(false), valid(false), inview(false), id(-1), memEntry(nullptr),
+	BoneArray2() : _isDead(false), valid(false), inview(false), id(-1), memEntry(nullptr),
 		lastInViewCheckTs(0), isMoving(false), startedMovingTs(0), numTimesMoved(0),
 		lastKnownMovedBoneIdx(0), dynOffset(0), ally(false), distTravalled(0)
 	{
 		dirty=true;
+		lastValidMoveTs = 0;
 	}
 
 	void update(float dt, float tNow) override;
 	void updateInView(float tNow);
-	void updateValidation(float tNow, float dt);
-	void updateInvalidate(float tNow);
+	void updateValidation(float tNow, float dt, bool validMove);
+	void updateInvalidate(float tNow, bool validMove);
 	void updateTargetPoint();
 
 	bool didValidMove() const;
@@ -144,8 +146,9 @@ public:
 	const MemEntry* getEntry() const override { return memEntry; }
 	u32 getTypeId() const override ;
 	void setDirty(bool _dirty) override { dirty=_dirty; }
+	bool isDead() const override { return _isDead; }
 
-	bool missile;
+	bool _isDead;
 	bool valid;
 	bool inview;
 	u32 id;
@@ -163,6 +166,9 @@ public:
 
 	Vec3 targetPos;
 	float distTravalled;
+
+	// invalidate
+	float lastValidMoveTs;
 
 	// cache
 	mutable bool dirty;
