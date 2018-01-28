@@ -314,7 +314,7 @@ namespace Null
 						bKeep = cb(newData, oldData, block.baseAddress, e.offset + offs, block.size, e.typeId);
 						if ( bKeep ) 
 						{ 
-							printf("FILTER REFETCH at offset %d\n", offs);
+						//	printf("FILTER REFETCH at offset %d\n", offs);
 							e.offset += offs;
 							break; 
 						}
@@ -328,7 +328,7 @@ namespace Null
 							bKeep = cb(newData, oldData, block.baseAddress, e.offset + offs, block.size, e.typeId);
 							if ( bKeep )
 							{ 
-								printf("FILTER REFETCH at offset %d\n", offs);
+							//	printf("FILTER REFETCH at offset %d\n", offs);
 								e.offset += offs; 
 								break;
 							}
@@ -539,7 +539,7 @@ namespace Null
 					res = tryUpdateEntry(s, e, oldData, -i*alignment, removeFilter);
 					if (res == 1)
 					{
-						printf("REFETCHED at %d offset\n", -i*alignment);
+				//		printf("REFETCHED at %d offset\n", -i*alignment);
 						numSucceeded++; 
 						break;
 					}
@@ -551,7 +551,7 @@ namespace Null
 						res = tryUpdateEntry(s, e, oldData, i*alignment, removeFilter);
 						if (res == 1)
 						{
-							printf("REFETCHED at %d offset\n", i*alignment);
+				//			printf("REFETCHED at %d offset\n", i*alignment);
 							numSucceeded++;
 							break; 
 						}

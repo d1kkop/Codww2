@@ -16,6 +16,7 @@ bool AllowReject = false;
 bool CanLooseTarget = false;
 float AllyDistance = 10.f; // meters
 float GroupDist = 1.2f;
+float LooseTargetDist=10; // meters
 u32 CamIndex = 0;
 
 
@@ -27,8 +28,9 @@ float MinDst = 3.0f;
 float AimSpd = 255;
 float AimSpdV = 55;
 float AimZ   = 0.7f * M2U;
-float DistConstant = .1f;
-float DistOverDotExp = 2.f;
+float DistDotScale = 10.f;
+float DistConstant = 1.f;
+float DistOverDotExp = 1.f;
 float AimPushBackLength = -20.f;
 float MinRetargetTime = .2f;
 float FocusMultiplier = 2.f;
@@ -171,7 +173,7 @@ void BoneArray2::updateValidation(float tNow, float dt, bool validMove)
 			{
 				isMoving = false;
 				valid = true;
-				Botter::log(str_format( "VALID barray %p %d\n", this->getAddress(), this->getId()));
+		//		Botter::log(str_format( "VALID barray %p %d\n", this->getAddress(), this->getId()));
 			}
 		}
 	}
@@ -197,12 +199,14 @@ void BoneArray2::updateInvalidate(float tNow, bool validMove)
 
 void BoneArray2::updateTargetPoint()
 {
-	Vec3 lookDir = (getBoneRotation(0) * Vec3(0.f, 1, 0));
+	Vec3 lookDir; 
 	if ( memEntry->typeId != 0 )
 		lookDir = Vec3(1,0,0);
+	else
+		lookDir = (getBoneRotation(0) * Vec3(0.f, 1, 0));
 	Vec3 vel2D   = vel.velocity();
 	vel2D.z = 0.f;
-	Vec3 newTarget = (getPosition() + Vec3(0, 0, AimZ) + lookDir*AimPushBackLength) + (vel2D * U2M * AimVelMulplier);
+	Vec3 newTarget = (getPosition() + Vec3(0, 0, AimZ*M2U) + lookDir*AimPushBackLength*M2U) + (vel2D * U2M * AimVelMulplier);
 	Vec3 delta = newTarget - targetPos;
 	targetPos += delta * AimFollowSoftness;
 }
@@ -281,7 +285,7 @@ Vec3 BoneArray2::getBonePosition(u32 boneIdx) const
 		} 
 		else
 		{
-			cachePos = *(Vec3*)(memEntry->value.ptr + 0x3C + 16 + dynOffset);
+			cachePos = *(Vec3*)(memEntry->value.ptr + 0x3C + 0 + dynOffset);
 		}
 	}
 	
@@ -332,8 +336,6 @@ Botter::Botter():
 	m_boneArrayState  = MemoryState::Find;
 	m_isFocussing = false;
 
-	reloadConfig();
-
 	file_remove( "Botter_output.txt" );
 
 	m_gameCam.valid = false;
@@ -341,6 +343,10 @@ Botter::Botter():
 
 	if (m_scanner.getHandle())
 	{
+		log("------ Found COD WW2. Starting bot... ------\n\n");
+
+		reloadConfig();
+
 		m_cameraThread = std::thread([&]() { cameraSearch(); });
 		m_boneArrayThread = std::thread([&]() { boneArraySearch(); });
 		SetThreadPriority( m_cameraThread.native_handle(), THREAD_MODE_BACKGROUND_BEGIN );
@@ -348,6 +354,7 @@ Botter::Botter():
 		SetThreadAffinityMask( m_cameraThread.native_handle(), 2 );
 		SetThreadAffinityMask( m_boneArrayThread.native_handle(), 4 );
 
+		
 	} else  log("Cod ww2 not started..\n");
 }
 
@@ -527,7 +534,7 @@ void Botter::filterCamera()
 		i32 iRes = isValidCamera(newData);
 		if ( iRes != 0 )
 		{
-			log(str_format("Camera filter failure error: %d\n", iRes));
+		//	log(str_format("Camera filter failure error: %d\n", iRes));
 		}
 		return iRes == 0;
 	});
@@ -748,6 +755,7 @@ void Botter::reloadConfig()
 		AllyDistance = (float)reader.GetReal("general", "allyDistance", 8.5); // meters
 		GroupDist = (float)reader.GetReal("general", "groupDist", 1.2f);
 		DesiredTickRate = reader.GetInteger("general", "desiredTickRate", 80); // meters
+		LooseTargetDist = (float)reader.GetReal("general", "looseTargetDist", 10); // metrs
 		CamIndex = reader.GetInteger("general", "camIndex", 0);
 		
 		 // Aim
@@ -758,8 +766,9 @@ void Botter::reloadConfig()
 		AimSpd  = (float)reader.GetReal("aim", "aimSpd", 255);
 		AimSpdV = (float)reader.GetReal("aim", "aimSpdV", 55);
 		AimZ    = (float)reader.GetReal("aim", "aimZ", .7) * M2U;
-		DistConstant = (float)reader.GetReal("aim", "distConstant", .3);
 		AimPushBackLength = (float)reader.GetReal("aim", "aimPushBackLength", .3) * M2U;
+		DistDotScale = (float)reader.GetReal("aim", "distDotScale", 10.f);
+		DistConstant = (float)reader.GetReal("aim", "distConstant", 1.f);
 		DistOverDotExp = (float)reader.GetReal("aim", "distOverDotExp", 2.f);
 		AimVelMulplier = (float)reader.GetReal("aim", "aimVelMultiplier", 10);
 		AimFollowSoftness = (float)reader.GetReal("aim", "aimFollowSoftness", .9);
@@ -929,11 +938,20 @@ IBoneArray* Botter::findBestTarget() const
 		dist = dir.length();
 		dir  *= (1.f/dist);
 		dist *= U2M;
-
-		float hDot = dir.dot(viewDir);
+		
 		float vDot = fabs(dir.dot(upDir));
+		dir.z = 0;
+		viewDir.z = 0;
+		dir.normalize();
+		viewDir.normalize();
+		float hDot = dir.dot(viewDir);
 
-		float fDist = dist + (1.f - fabs(hDot)) * powf(dist * DistConstant, DistOverDotExp);
+		// functional dist 
+		float alpha = 1-hDot;
+		alpha = max(0.f, alpha);
+		alpha = min(1.f, alpha);
+		float fDist = pow(alpha*DistDotScale, DistOverDotExp) * dist + dist*DistConstant;
+		//float fDist = (1-alpha)*dist + alpha*hDot*DotBaseConstant;
 
 		if ((dist > MinDst && dist < MaxDst) && 
 			(hDot > AimDot && vDot < AimDotV) &&
@@ -985,13 +1003,20 @@ void Botter::aim(float tNow, float dt)
 			// update address as it may have been shifted slightly in memory
 			m_target = curTarget->getAddress();
 
-			// loose target if got killed (dist since last update is more than some meters)
-			// or if not moving anymore
+			// loose target on dist exceeded
 			float dist = curTarget->getPosition().dist(m_lastTargetPos) * U2M;
-			if ( (dist > 25.f) || ( CanLooseTarget && (curTarget->getVelocity().length() < VelocityFailThreshold))  ) 
+			if ( dist > LooseTargetDist ) 
 			{
 				resetTarget();
-				Botter::log("Lost target\n");
+				Botter::log(str_format("Lost target (LooseTargetDist exceeded %.3fM)\n", dist));
+			}
+
+			// loose target on velocity fail
+			float curVel = curTarget->getVelocity().length();
+			if ( CanLooseTarget && (curVel < VelocityFailThreshold) )
+			{
+				resetTarget();
+				Botter::log(str_format("Lost target (Velocity too low %.3fms)\n", curVel));
 			}
 		}
 		else 
@@ -1001,13 +1026,13 @@ void Botter::aim(float tNow, float dt)
 		}
 
 		// if still has target, see if there is better one if switching targets is allowed
-		if ( m_target && AllowSwitching )
+		if ( m_target && AllowSwitching && (tNow - m_lastTargetResetTs < MinRetargetTime) )
 		{
 			IBoneArray* curBest = findBestTarget();
 			if ( curBest != curTarget && curBest != nullptr )
 			{
 				Botter::log("Switching target\n");
-				resetTarget();
+				m_target = nullptr; // do not reset time again
 			}
 		}
 
@@ -1034,7 +1059,7 @@ void Botter::aim(float tNow, float dt)
 
 	if (curTarget)
 	{
-		m_lastTargetPos = curTarget->getPosition();// avgTargetPos;
+		m_lastTargetPos = curTarget->getTargetPosition();// avgTargetPos;
 
 		// skip aim if we sent mouse input but our view dir did not get adjusted.
 		// this is to prevent a bug that we keep sending mouse input even if the view dir does not change
